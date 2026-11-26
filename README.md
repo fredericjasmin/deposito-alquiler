@@ -34,7 +34,7 @@ Inquilino                     Contrato                      Propietario
 
 1. **`crear`**: el inquilino firma y transfiere el depósito al contrato. Se guarda quién es el propietario, el token y el monto. Devuelve un número de depósito (`id`).
 2. **`proponer`**: cualquiera de las dos partes propone cuánto vuelve al inquilino (de 0 al total). Si la otra parte no está de acuerdo, puede hacer su propia propuesta, que reemplaza a la anterior.
-3. **`aceptar`**: la parte que no hizo la última propuesta la acepta. El contrato manda lo acordado al inquilino y el resto al propietario, y marca el depósito como cerrado.
+3. **`aceptar`**: la parte que no hizo la última propuesta la acepta, indicando el monto que está aceptando. El contrato manda lo acordado al inquilino y el resto al propietario, y marca el depósito como cerrado.
 4. **`ver`** y **`total`**: consultas de solo lectura.
 
 ### Reglas que cuida el contrato
@@ -49,6 +49,7 @@ Inquilino                     Contrato                      Propietario
 | Un depósito cerrado no se puede tocar más | `YaCerrado` (5) |
 | No se puede aceptar si nadie propuso nada | `SinPropuesta` (6) |
 | Nadie puede aceptar su propia propuesta | `NoPuedeAceptarSuPropia` (7) |
+| Al aceptar hay que indicar el monto propuesto; si la propuesta cambió justo antes, no se acepta | `PropuestaCambio` (8) |
 
 Cada función que mueve o decide algo pide la firma (`require_auth`) de quien la llama. El contrato emite eventos `DepositoCreado`, `DevolucionPropuesta` y `DepositoCerrado`, así una app puede mostrar el historial.
 
@@ -108,7 +109,7 @@ stellar contract invoke --id deposito-alquiler --source propietario --network te
 
 # 3. El inquilino acepta y el contrato reparte
 stellar contract invoke --id deposito-alquiler --source inquilino --network testnet -- \
-  aceptar --id 1 --quien inquilino
+  aceptar --id 1 --quien inquilino --al_inquilino 800000000
 
 # Consultar
 stellar contract invoke --id deposito-alquiler --source inquilino --network testnet --send=no -- \
@@ -117,9 +118,9 @@ stellar contract invoke --id deposito-alquiler --source inquilino --network test
 
 ## Desplegado en testnet
 
-Contrato: [`CBECT63GG64MTZGYFS5IXQWEKYL2DRZTFM4I54GCUH6STM363LHFJEBM`](https://stellar.expert/explorer/testnet/contract/CBECT63GG64MTZGYFS5IXQWEKYL2DRZTFM4I54GCUH6STM363LHFJEBM)
+Contrato: [`CC7B6Q5ANYIEDKIKKZOSYGT3RP67BLWGOKSWATJ3RRFC5RSA6AJNYE3U`](https://stellar.expert/explorer/testnet/contract/CC7B6Q5ANYIEDKIKKZOSYGT3RP67BLWGOKSWATJ3RRFC5RSA6AJNYE3U)
 
-Ahí corrí el flujo completo de arriba: un depósito de 100 XLM, el propietario propuso devolver 80, el inquilino aceptó y el contrato mandó 80 XLM al inquilino y 20 al propietario. Resultado de `ver --id 1`:
+Ahí corrí el flujo completo de arriba: un depósito de 100 XLM, el propietario propuso devolver 80, el inquilino aceptó y el contrato mandó 80 XLM al inquilino y 20 al propietario. También probé aceptar con un monto distinto al propuesto y el contrato lo rechazó con el error 8. Resultado de `ver --id 1`:
 
 ```json
 {
@@ -135,7 +136,7 @@ Ahí corrí el flujo completo de arriba: un depósito de 100 XLM, el propietario
 
 ## Pruebas
 
-Son 14 pruebas en `contracts/deposito/src/test.rs`, con un token real de prueba (Stellar Asset Contract):
+Son 15 pruebas en `contracts/deposito/src/test.rs`, con un token real de prueba (Stellar Asset Contract):
 
 | Prueba | Qué verifica |
 | --- | --- |
@@ -148,6 +149,7 @@ Son 14 pruebas en `contracts/deposito/src/test.rs`, con un token real de prueba 
 | `una_contrapropuesta_reemplaza_la_anterior` | Se puede negociar con contrapropuestas |
 | `nadie_acepta_su_propia_propuesta` | El propietario no puede proponer 0 y aceptarse solo |
 | `un_tercero_no_puede_proponer_ni_aceptar` | Una cuenta ajena no puede intervenir |
+| `no_se_acepta_si_la_propuesta_cambio` | Si el propietario cambia la propuesta justo antes de que el inquilino acepte, la aceptación falla y no se mueve nada |
 | `no_se_acepta_sin_propuesta` | No se reparte nada sin una propuesta |
 | `no_se_reparte_dos_veces` | Un depósito cerrado no se vuelve a repartir |
 | `montos_invalidos` | Montos en 0, negativos o mayores al depósito |
@@ -155,7 +157,7 @@ Son 14 pruebas en `contracts/deposito/src/test.rs`, con un token real de prueba 
 | `varios_depositos_son_independientes` | Cerrar un depósito no toca a los demás |
 
 ```
-test result: ok. 14 passed; 0 failed
+test result: ok. 15 passed; 0 failed
 ```
 
 ## Limitaciones y próximos pasos

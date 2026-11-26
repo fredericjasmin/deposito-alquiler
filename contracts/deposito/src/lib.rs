@@ -57,6 +57,7 @@ pub enum Error {
     YaCerrado = 5,
     SinPropuesta = 6,
     NoPuedeAceptarSuPropia = 7,
+    PropuestaCambio = 8,
 }
 
 #[contractevent]
@@ -180,7 +181,9 @@ impl DepositoAlquiler {
     }
 
     /// La otra parte acepta la propuesta y el contrato reparte el depósito.
-    pub fn aceptar(env: Env, id: u32, quien: Address) -> Result<(), Error> {
+    /// `al_inquilino` es el monto que quien acepta vio y firmó: si la
+    /// propuesta cambió mientras tanto, la llamada falla y no se mueve nada.
+    pub fn aceptar(env: Env, id: u32, quien: Address, al_inquilino: i128) -> Result<(), Error> {
         quien.require_auth();
 
         let mut deposito = cargar(&env, id)?;
@@ -194,12 +197,14 @@ impl DepositoAlquiler {
         if autor == quien {
             return Err(Error::NoPuedeAceptarSuPropia);
         }
+        if al_inquilino != deposito.propuesta_al_inquilino {
+            return Err(Error::PropuestaCambio);
+        }
 
         // Primero se marca como cerrado y después se mueve la plata.
         deposito.estado = Estado::Cerrado;
         guardar(&env, id, &deposito);
 
-        let al_inquilino = deposito.propuesta_al_inquilino;
         let al_propietario = deposito.monto - al_inquilino;
         let token = token::Client::new(&env, &deposito.token);
         let contrato = env.current_contract_address();

@@ -84,7 +84,7 @@ fn devolucion_completa() {
         .crear(&e.inquilino, &e.propietario, &e.token.address, &600_000);
 
     e.contrato.proponer(&id, &e.propietario, &600_000);
-    e.contrato.aceptar(&id, &e.inquilino);
+    e.contrato.aceptar(&id, &e.inquilino, &600_000);
 
     assert_eq!(e.token.balance(&e.inquilino), 1_000_000);
     assert_eq!(e.token.balance(&e.propietario), 0);
@@ -101,7 +101,7 @@ fn descuento_por_danos() {
 
     // El propietario descuenta 150 000 por una puerta rota.
     e.contrato.proponer(&id, &e.propietario, &450_000);
-    e.contrato.aceptar(&id, &e.inquilino);
+    e.contrato.aceptar(&id, &e.inquilino, &450_000);
 
     assert_eq!(e.token.balance(&e.inquilino), 850_000);
     assert_eq!(e.token.balance(&e.propietario), 150_000);
@@ -116,7 +116,7 @@ fn el_inquilino_tambien_puede_proponer() {
         .crear(&e.inquilino, &e.propietario, &e.token.address, &600_000);
 
     e.contrato.proponer(&id, &e.inquilino, &500_000);
-    e.contrato.aceptar(&id, &e.propietario);
+    e.contrato.aceptar(&id, &e.propietario, &500_000);
 
     assert_eq!(e.token.balance(&e.inquilino), 900_000);
     assert_eq!(e.token.balance(&e.propietario), 100_000);
@@ -131,7 +131,7 @@ fn una_contrapropuesta_reemplaza_la_anterior() {
 
     e.contrato.proponer(&id, &e.propietario, &300_000);
     e.contrato.proponer(&id, &e.inquilino, &550_000);
-    e.contrato.aceptar(&id, &e.propietario);
+    e.contrato.aceptar(&id, &e.propietario, &550_000);
 
     assert_eq!(e.token.balance(&e.inquilino), 950_000);
     assert_eq!(e.token.balance(&e.propietario), 50_000);
@@ -144,14 +144,17 @@ fn aceptar_exige_la_firma_de_quien_acepta() {
         .contrato
         .crear(&e.inquilino, &e.propietario, &e.token.address, &600_000);
     e.contrato.proponer(&id, &e.propietario, &600_000);
-    e.contrato.aceptar(&id, &e.inquilino);
+    e.contrato.aceptar(&id, &e.inquilino, &600_000);
 
     let auths = e.env.auths();
     assert_eq!(auths[0].0, e.inquilino);
     match &auths[0].1.function {
         AuthorizedFunction::Contract((_, funcion, args)) => {
             assert_eq!(funcion, &Symbol::new(&e.env, "aceptar"));
-            assert_eq!(args, &(id, e.inquilino.clone()).into_val(&e.env));
+            assert_eq!(
+                args,
+                &(id, e.inquilino.clone(), 600_000_i128).into_val(&e.env)
+            );
         }
         _ => panic!("se esperaba la firma de una llamada al contrato"),
     }
@@ -165,7 +168,7 @@ fn nadie_acepta_su_propia_propuesta() {
         .crear(&e.inquilino, &e.propietario, &e.token.address, &600_000);
 
     e.contrato.proponer(&id, &e.propietario, &0);
-    let r = e.contrato.try_aceptar(&id, &e.propietario);
+    let r = e.contrato.try_aceptar(&id, &e.propietario, &0);
     assert_eq!(r, Err(Ok(Error::NoPuedeAceptarSuPropia)));
     assert_eq!(e.token.balance(&e.contrato.address), 600_000);
 }
@@ -184,7 +187,7 @@ fn un_tercero_no_puede_proponer_ni_aceptar() {
     );
     e.contrato.proponer(&id, &e.propietario, &600_000);
     assert_eq!(
-        e.contrato.try_aceptar(&id, &extrano),
+        e.contrato.try_aceptar(&id, &extrano, &600_000),
         Err(Ok(Error::NoEsParte))
     );
 }
@@ -197,7 +200,7 @@ fn no_se_acepta_sin_propuesta() {
         .crear(&e.inquilino, &e.propietario, &e.token.address, &600_000);
 
     assert_eq!(
-        e.contrato.try_aceptar(&id, &e.inquilino),
+        e.contrato.try_aceptar(&id, &e.inquilino, &0),
         Err(Ok(Error::SinPropuesta))
     );
 }
@@ -209,10 +212,10 @@ fn no_se_reparte_dos_veces() {
         .contrato
         .crear(&e.inquilino, &e.propietario, &e.token.address, &600_000);
     e.contrato.proponer(&id, &e.propietario, &600_000);
-    e.contrato.aceptar(&id, &e.inquilino);
+    e.contrato.aceptar(&id, &e.inquilino, &600_000);
 
     assert_eq!(
-        e.contrato.try_aceptar(&id, &e.inquilino),
+        e.contrato.try_aceptar(&id, &e.inquilino, &600_000),
         Err(Ok(Error::YaCerrado))
     );
     assert_eq!(
@@ -269,9 +272,29 @@ fn varios_depositos_son_independientes() {
     assert_eq!((a, b), (1, 2));
 
     e.contrato.proponer(&b, &otro_propietario, &0);
-    e.contrato.aceptar(&b, &e.inquilino);
+    e.contrato.aceptar(&b, &e.inquilino, &0);
 
     assert_eq!(e.token.balance(&otro_propietario), 200_000);
     assert_eq!(e.token.balance(&e.contrato.address), 300_000);
     assert_eq!(e.contrato.ver(&a).estado, Estado::Activo);
+}
+
+#[test]
+fn no_se_acepta_si_la_propuesta_cambio() {
+    let e = escenario();
+    let id = e
+        .contrato
+        .crear(&e.inquilino, &e.propietario, &e.token.address, &600_000);
+
+    // El inquilino vio una propuesta de 600 000, pero el propietario la
+    // cambia a 0 justo antes de que el inquilino acepte.
+    e.contrato.proponer(&id, &e.propietario, &600_000);
+    e.contrato.proponer(&id, &e.propietario, &0);
+
+    assert_eq!(
+        e.contrato.try_aceptar(&id, &e.inquilino, &600_000),
+        Err(Ok(Error::PropuestaCambio))
+    );
+    assert_eq!(e.token.balance(&e.contrato.address), 600_000);
+    assert_eq!(e.contrato.ver(&id).estado, Estado::Activo);
 }
